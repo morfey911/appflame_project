@@ -5,14 +5,15 @@ import ComposableArchitecture
 @Reducer
 struct StatisticsFeature {
     @ObservableState
-    struct State: Equatable {
-        var path = StackState<Path.State>()
+    struct State {
+        @Presents var destination: Destination.State?
         
         var header = HeaderFeature.State()
         var chart = ChartFeature.State()
         var periodSelector = PeriodFeature.State()
         var transactions = TransactionsFeature.State()
         
+        var hasLoadedInitialData = false
         var isLoading = false
         var selectedPeriod: TimePeriod = .week
         var selectedIndex: Int?
@@ -65,7 +66,7 @@ struct StatisticsFeature {
         }
     }
 
-    enum Action: Equatable {
+    enum Action {
         case header(HeaderFeature.Action)
         case chart(ChartFeature.Action)
         case periodSelector(PeriodFeature.Action)
@@ -77,25 +78,12 @@ struct StatisticsFeature {
         case dataLoaded
         case dataLoadingFailed(DataServiceError)
         
-        case path(StackAction<Path.State, Path.Action>)
+        case destination(PresentationAction<Destination.Action>)
     }
     
     @Reducer
-    struct Path {
-        @ObservableState
-        enum State: Equatable {
-            case transactionDetails(TransactionDetailsFeature.State)
-        }
-        
-        enum Action: Equatable {
-            case transactionDetails(TransactionDetailsFeature.Action)
-        }
-        
-        var body: some ReducerOf<Self> {
-            Scope(state: \.transactionDetails, action: \.transactionDetails) {
-                TransactionDetailsFeature()
-            }
-        }
+    enum Destination {
+        case detailsItem(TransactionDetailsFeature)
     }
 
     @Dependency(\.dataClient) var newDataClient
@@ -120,7 +108,11 @@ struct StatisticsFeature {
         Reduce { state, action in
             switch action {
             case .onAppear:
-                return .send(.loadData)
+                if !state.hasLoadedInitialData {
+                    state.hasLoadedInitialData = true
+                    return .send(.loadData)
+                }
+                return .none
 
             case .loadData:
                 state.isLoading = true
@@ -162,74 +154,64 @@ struct StatisticsFeature {
                 return .none
                 
             case let .transactions(.transactionSelected(transaction)):
-                state.path.append(.transactionDetails(.init(transaction: transaction)))
+                state.destination = .detailsItem(TransactionDetailsFeature.State(transaction: transaction))
                 return .none
-                
-            case .path:
+            default:
                 return .none
             }
         }
-        .forEach(\.path, action: \.path) {
-            Path()
-        }
+        .ifLet(\.$destination, action: \.destination)
     }
 }
 
 struct StatisticsView: View {
-    @Bindable private var store: StoreOf<StatisticsFeature>
+    @Bindable var store: StoreOf<StatisticsFeature>
     @State private var showTransactions: Bool = true
-
-    init(store: StoreOf<StatisticsFeature>) {
-        self.store = store
-        UINavigationBar.appearance().titleTextAttributes = [.foregroundColor: UIColor.white]
-    }
-
+    
     var body: some View {
-        NavigationStackStore(
-            store.scope(state: \.path, action: \.path)
-        ) {
-            ZStack {
-                Color(red: 0.13, green: 0.26, blue: 0.19)
-                    .ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    HeaderView(store: store.scope(state: \.header, action: \.header))
-
-                    ChartView(store: store.scope(state: \.chart, action: \.chart))
-                        .frame(height: 171)
-
-                    PeriodView(store: store.scope(state: \.periodSelector, action: \.periodSelector))
-                        .padding()
-                    
-                    Spacer()
-                }
+        ZStack {
+            Color(red: 0.13, green: 0.26, blue: 0.19)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                HeaderView(store: store.scope(state: \.header, action: \.header))
+                
+                ChartView(store: store.scope(state: \.chart, action: \.chart))
+                    .frame(height: 171)
+                
+                PeriodView(store: store.scope(state: \.periodSelector, action: \.periodSelector))
+                    .padding()
+                
+                Spacer()
             }
-            .navigationTitle("Statistics")
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                store.send(.onAppear)
-                showTransactions = true
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Statistics")
+                    .font(.headline)
+                    .foregroundColor(.white)
             }
-            .onChange(of: store.path.count) { _, newValue in
-                showTransactions = newValue == 0
-            }
-            .sheet(isPresented: $showTransactions) {
-                TransactionsView(store: store.scope(state: \.transactions, action: \.transactions))
-                    .presentationDetents([.height(340), .height(725)])
-                    .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
-                    .presentationDragIndicator(.visible)
-                    .interactiveDismissDisabled()
-                    .presentationCornerRadius(32)
-            }
-        } destination: { state in
-            switch state {
-            case .transactionDetails:
-                CaseLet(
-                    /StatisticsFeature.Path.State.transactionDetails,
-                     action: { StatisticsFeature.Path.Action.transactionDetails($0) },
-                     then: TransactionDetailsView.init(store:)
-                )
-            }
+        }
+        .onAppear {
+            store.send(.onAppear)
+            showTransactions = true
+        }
+        .onChange(of: store.destination?.detailsItem) { _, newValue in
+            showTransactions = newValue == nil
+        }
+        .sheet(isPresented: $showTransactions) {
+            TransactionsView(store: store.scope(state: \.transactions, action: \.transactions))
+                .presentationDetents([.height(340), .height(725)])
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(340)))
+                .presentationDragIndicator(.visible)
+                .interactiveDismissDisabled()
+                .presentationCornerRadius(32)
+        }
+        .navigationDestination(
+            item: $store.scope(state: \.destination?.detailsItem, action: \.destination.detailsItem)
+        ) { store in
+            TransactionDetailsView(store: store)
         }
     }
 }

@@ -8,12 +8,24 @@ struct TransactionDetailsFeature {
         var transaction: BalanceChange
     }
     
-    enum Action: Equatable {}
+    enum Action: Equatable {
+        case backButtonPressed
+    }
+    
+    @Dependency(\.dismiss) private var dismiss
+    
+    var body: some ReducerOf<Self> {
+        Reduce { state, action in
+            switch action {
+            case .backButtonPressed:
+                return .run { [dismiss] _ in await dismiss() }
+            }
+        }
+    }
 }
 
 struct TransactionDetailsView: View {
     let store: StoreOf<TransactionDetailsFeature>
-    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         VStack(spacing: 24) {
@@ -55,7 +67,7 @@ struct TransactionDetailsView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: {
-                    dismiss()
+                    store.send(.backButtonPressed)
                 }) {
                     Image(systemName: "arrow.left")
                         .foregroundColor(.black)

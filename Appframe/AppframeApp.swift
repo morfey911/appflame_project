@@ -9,7 +9,9 @@ struct AppframeApp: App {
     
     var body: some Scene {
         WindowGroup {
-            StatisticsView(store: AppframeApp.store)
+            NavigationStack {
+                StatisticsView(store: AppframeApp.store)
+            }
         }
     }
 }
